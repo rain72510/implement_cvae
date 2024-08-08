@@ -151,11 +151,11 @@ class VAE_Model(nn.Module):
         plt.clf()
     
     def training_stage(self):
-        self.frame_transformation.train()
-        self.label_transformation.train()
-        self.Gaussian_Predictor.train()
-        self.Decoder_Fusion.train()
-        self.Generator.train()
+        # self.frame_transformation.train()
+        # self.label_transformation.train()
+        # self.Gaussian_Predictor.train()
+        # self.Decoder_Fusion.train()
+        # self.Generator.train()
 
         logfile = open(os.path.join(self.args.save_root, 'log.txt'), 'a')
         for i in range(self.args.num_epoch):
@@ -163,11 +163,15 @@ class VAE_Model(nn.Module):
             adapt_TeacherForcing = True if random.random() < self.tfr else False
             
             cnt_o = 0
+            cnt_not_NaN = 0
             for (img, label) in (pbar := tqdm(train_loader, ncols=120)):
                 img = img.to(self.args.device)
                 label = label.to(self.args.device)
                 loss, mse, kld = self.training_one_step(img, label, adapt_TeacherForcing, cnt_o)
                 cnt_o += 1
+                if loss == "NaN":
+                    continue
+                cnt_not_NaN += 1
                 self.log['train']['loss'].append(loss.detach().cpu())
                 self.log['train']['mse'].append(mse.detach().cpu())
                 self.log['train']['kld'].append(kld.detach().cpu())
@@ -184,8 +188,8 @@ class VAE_Model(nn.Module):
             if self.current_epoch % self.args.per_save == 0:
                 self.save(os.path.join(self.args.save_root, f"epoch={self.current_epoch}.ckpt"))
             # append log
+            print("cnt_not_NaN/cnt_o: ", cnt_not_NaN, "/", cnt_o, flush=True)
             print(f"epoch: {i} [Train] loss: {self.log['train']['loss'][-1]}, mse: {self.log['train']['mse'][-1]}, kld: {self.log['train']['kld'][-1]}", file=logfile, flush=True)
-
             self.eval()
             self.current_epoch += 1
             self.scheduler.step()
@@ -200,11 +204,11 @@ class VAE_Model(nn.Module):
     @torch.no_grad()
     def eval(self):
         val_loader = self.val_dataloader()
-        self.frame_transformation.eval()
-        self.label_transformation.eval()
-        self.Gaussian_Predictor.eval()
-        self.Decoder_Fusion.eval()
-        self.Generator.eval()
+        # self.frame_transformation.eval()
+        # self.label_transformation.eval()
+        # self.Gaussian_Predictor.eval()
+        # self.Decoder_Fusion.eval()
+        # self.Generator.eval()
         for (img, label) in (pbar := tqdm(val_loader, ncols=120)):
             img = img.to(self.args.device)
             label = label.to(self.args.device)
@@ -223,12 +227,19 @@ class VAE_Model(nn.Module):
         
     
     def training_one_step(self, img, label, adapt_TeacherForcing, cnt_o):
+        def mse_myf(pred, img):
+            return torch.mean((pred - img) ** 2)
         img, label = img.transpose(0, 1), label.transpose(0, 1)
+        # print img max, min, label max, min
+        if img.max() > 1 or label.max() > 1:
+            print("imglabel max!, epoch: ", self.current_epoch, " i: ", cnt_o, flush=True)
+            print("img max: ", img.max(), "img min: ", img.min(), flush=True)
+            print("label max: ", label.max(), "label min: ", label.min(), flush=True)
         code_img = []
         code_label = []
         for i in range(self.train_vi_len):
-            code_img.append(self.frame_transformation(img[i]))
-            code_label.append(self.label_transformation(label[i]))
+            code_img.append(self.frame_transformation.forward(img[i]))
+            code_label.append(self.label_transformation.forward(label[i]))
         code_img = stack(code_img)
         code_label = stack(code_label)
         total_loss = 0.0
@@ -237,11 +248,7 @@ class VAE_Model(nn.Module):
         pred = None
         beta = self.kl_annealing.get_beta()
 
-
-        output_rem = None
-        pred_rem = None
-        mu_rem = None
-        logvar_rem = None
+        NaNhere = False
         for i in range(self.train_vi_len - 1):
             z, mu, logvar = self.Gaussian_Predictor.forward(code_img[i+1], code_label[i+1])
             if adapt_TeacherForcing or not pred:
@@ -249,74 +256,70 @@ class VAE_Model(nn.Module):
             else:
                 output = self.Decoder_Fusion.forward(pred, code_label[i+1], z)
             pred = self.Generator.forward(output)
-            # if pred > 1 or pred < 0, clip it:
             pred = torch.clamp(pred, 0, 1)
+            if torch.isnan(pred).any():
+                NaNhere = True
+                print("NaNishere!", flush=True)
+                break
+            # change nan to 1
+            pred = torch.nan_to_num(pred, nan=1.0, posinf=1.0, neginf=0.0)
 
-            if i == 0:
-                output_rem = output
-                pred_rem = pred
-                mu_rem = mu
-                logvar_rem = logvar
             mse = self.mse_criterion(pred, img[i+1])
+            mse_my = mse_myf(pred, img[i+1])
             kld = kl_criterion(mu, logvar, self.batch_size) / (self.args.frame_H * self.args.frame_W * self.args.N_dim)
             # loss = mse + kld * beta
             total_mse += mse
             total_kld += kld
-
-            # mse nan check
-            if mse > 10 or mse != mse:
-                print("epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
+            if mse != mse:
+                # print output, pred, img[i+1], z, mu, logvar
+                print("explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
+                print("mse_my: ", mse_my, flush=True)
+                print("output: ", output, flush=True)
+                print("pred: ", pred, flush=True)
+                print("img: ", img[i+1], flush=True)
+                print("z: ", z, flush=True)
                 print("mu: ", mu, flush=True)
                 print("logvar: ", logvar, flush=True)
-                print("mu_rem: ", mu_rem, flush=True)
-                print("logvar_rem: ", logvar_rem, flush=True)
-                print("output_shape: ", output.shape, flush=True)
-                print("output: ", output, flush=True)
-                print("output_rem: ", output_rem, flush=True)
-                print("pred_shape: ", pred.shape, flush=True)
-                print("pred: ", pred, flush=True)
-                print("pred_rem: ", pred_rem, flush=True)
-                print("img_shape: ", img[i+1].shape, flush=True)
-                print("img: ", img[i+1], flush=True)
-
-            pred = self.frame_transformation(pred)
+            pred = self.frame_transformation.forward(pred)
             # loss.backward()
-        total_mse /= (self.train_vi_len - 1)
-        total_kld /= (self.train_vi_len - 1)
+        total_mse /= min(1, (self.train_vi_len - 1))
+        total_kld /= min(1, (self.train_vi_len - 1))
         total_loss = total_mse + total_kld * beta
-
+        if NaNhere:
+            print("NaNishere! cnt_o: ", cnt_o, flush=True)
+            return "NaN", 0, 0
         self.optim.zero_grad()
         total_loss.backward()
 
-        if total_mse > 10:
-            print("explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
-            # print maximum gradient
-            max_grad = 0
-            for name, param in self.Decoder_Fusion.named_parameters():
-                if param.grad is not None:
-                    max_grad = max(max_grad, param.grad.abs().max())
-            print("Decoder_Fusion max_grad: ", max_grad, flush=True)
-            max_grad = 0
-            for name, param in self.Generator.named_parameters():
-                if param.grad is not None:
-                    max_grad = max(max_grad, param.grad.abs().max())
-            print("Generator max_grad: ", max_grad, flush=True)
+        # if total_mse > 20:
+        #     print("explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
+        #     # print maximum gradient
+        #     max_grad = 0
+        #     for name, param in self.Decoder_Fusion.named_parameters():
+        #         if param.grad is not None:
+        #             max_grad = max(max_grad, param.grad.abs().max())
+        #     print("Decoder_Fusion max_grad: ", max_grad, flush=True)
+        #     max_grad = 0
+        #     for name, param in self.Generator.named_parameters():
+        #         if param.grad is not None:
+        #             max_grad = max(max_grad, param.grad.abs().max())
+        #     print("Generator max_grad: ", max_grad, flush=True)
 
 
         nn.utils.clip_grad_norm_(self.parameters(), 1.)
-        if total_mse > 10:
-            print("explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
-            # print maximum gradient
-            max_grad = 0
-            for name, param in self.Decoder_Fusion.named_parameters():
-                if param.grad is not None:
-                    max_grad = max(max_grad, param.grad.abs().max())
-            print("Decoder_Fusion max_grad: ", max_grad, flush=True)
-            max_grad = 0
-            for name, param in self.Generator.named_parameters():
-                if param.grad is not None:
-                    max_grad = max(max_grad, param.grad.abs().max())
-            print("Generator max_grad: ", max_grad, flush=True)
+        # if total_mse > 20:
+        #     print("after clip explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
+        #     # print maximum gradient
+        #     max_grad = 0
+        #     for name, param in self.Decoder_Fusion.named_parameters():
+        #         if param.grad is not None:
+        #             max_grad = max(max_grad, param.grad.abs().max())
+        #     print("Decoder_Fusion max_grad: ", max_grad, flush=True)
+        #     max_grad = 0
+        #     for name, param in self.Generator.named_parameters():
+        #         if param.grad is not None:
+        #             max_grad = max(max_grad, param.grad.abs().max())
+        #     print("Generator max_grad: ", max_grad, flush=True)
         self.optim.step()
         # self.optimizer_step()
         return total_loss, total_mse, total_kld
@@ -327,8 +330,8 @@ class VAE_Model(nn.Module):
         code_img = []
         code_label = []
         for i in range(self.val_vi_len):
-            code_img.append(self.frame_transformation(img[i]))
-            code_label.append(self.label_transformation(label[i]))
+            code_img.append(self.frame_transformation.forward(img[i]))
+            code_label.append(self.label_transformation.forward(label[i]))
         code_img = stack(code_img)
         code_label = stack(code_label)
         total_loss = 0.0
