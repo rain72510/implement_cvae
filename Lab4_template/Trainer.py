@@ -164,6 +164,9 @@ class VAE_Model(nn.Module):
             
             cnt_o = 0
             cnt_not_NaN = 0
+            total_loss = 0.0
+            total_mse = 0.0
+            total_kld = 0.0
             for (img, label) in (pbar := tqdm(train_loader, ncols=120)):
                 img = img.to(self.args.device)
                 label = label.to(self.args.device)
@@ -172,19 +175,19 @@ class VAE_Model(nn.Module):
                 if loss == "NaN":
                     continue
                 cnt_not_NaN += 1
-                self.log['train']['loss'].append(loss.detach().cpu())
-                self.log['train']['mse'].append(mse.detach().cpu())
-                self.log['train']['kld'].append(kld.detach().cpu())
-                print("cnt_o: ", cnt_o, "total_mse: ", self.log['train']['loss'][-1], flush=True)
-                print("cnt_o: ", cnt_o, "total_kld: ", self.log['train']['mse'][-1], flush=True)
-                print("cnt_o: ", cnt_o, "total_loss: ", self.log['train']['kld'][-1], flush=True)
+                total_loss += loss.detach().cpu()
+                total_mse += mse.detach().cpu()
+                total_kld += kld.detach().cpu()
                 beta = self.kl_annealing.get_beta()
                 if adapt_TeacherForcing:
                     self.tqdm_bar('train [TeacherForcing: ON, {:.1f}], beta: {}'.format(self.tfr, beta), pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
                 else:
                     self.tqdm_bar('train [TeacherForcing: OFF, {:.1f}], beta: {}'.format(self.tfr, beta), pbar, loss.detach().cpu(), lr=self.scheduler.get_last_lr()[0])
                 
-            
+            if cnt_not_NaN > 0:
+                self.log['train']['loss'].append(total_loss / cnt_not_NaN)
+                self.log['train']['mse'].append(total_mse / cnt_not_NaN)
+                self.log['train']['kld'].append(total_kld / cnt_not_NaN)
             if self.current_epoch % self.args.per_save == 0:
                 self.save(os.path.join(self.args.save_root, f"epoch={self.current_epoch}.ckpt"))
             # append log
@@ -197,7 +200,12 @@ class VAE_Model(nn.Module):
             self.kl_annealing.update()
 
             print(f"epoch: {i} [Valid] loss: {self.log['val']['loss'][-1]}, mse: {self.log['val']['mse'][-1]}, kld: {self.log['val']['kld'][-1]}", file=logfile, flush=True)
-            
+        
+        # save log file using name
+        for log_type in ['train', 'val']:
+            for key in self.log[log_type].keys():
+                open(os.path.join(self.args.save_root, f"{log_type}_{key}.txt"), 'w').write('\n'.join([str(x) for x in self.log[log_type][key]]))
+        
         self.draw_logs()
             
             
@@ -251,7 +259,7 @@ class VAE_Model(nn.Module):
         NaNhere = False
         for i in range(self.train_vi_len - 1):
             z, mu, logvar = self.Gaussian_Predictor.forward(code_img[i+1], code_label[i+1])
-            if adapt_TeacherForcing or not pred:
+            if adapt_TeacherForcing or i == 0:
                 output = self.Decoder_Fusion.forward(code_img[i], code_label[i+1], z)
             else:
                 output = self.Decoder_Fusion.forward(pred, code_label[i+1], z)

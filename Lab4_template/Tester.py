@@ -120,10 +120,37 @@ class Test_model(VAE_Model):
         # label_list is used to store the label seq
         # Both list will be used to make gif
         decoded_frame_list = [img[0].cpu()]
-        label_list = []
+        label_list = [label[0].cpu()]
 
         # TODO
-        raise NotImplementedError
+        img_frame = img[0].to(self.args.device)
+        for i in range(630 - 1):
+            label_list.append(label[i+1].cpu())
+            label_frame = label[i+1].to(self.args.device)
+            
+            # Encode the image and label frame
+            print("img_frame", img_frame.shape)
+            print("label_frame", label_frame.shape)
+            img_frame = self.frame_transformation.forward(img_frame)
+            label_frame = self.label_transformation.forward(label_frame)
+            print("img_frame", img_frame.shape)
+            print("label_frame", label_frame.shape)
+            noise, mu, logvar = self.Gaussian_Predictor.forward(img_frame, label_frame)
+            print("noise", noise.shape)
+            print("mu", mu.shape)
+            print("logvar", logvar.shape)
+            # use N(0, 1)
+            z = torch.randn(1, self.args.N_dim).to(self.args.device)
+            print("z", z.shape)
+            # Concatenate the noise, image and label frame
+            output = self.Decoder_Fusion.forward(img_frame, label_frame, z)
+
+            
+            # Generate the image frame
+            decoded_frame = self.Generator(output)
+            decoded_frame_list.append(decoded_frame.cpu())
+            img_frame = decoded_frame
+        
             
         
         # Please do not modify this part, it is used for visulization
