@@ -111,7 +111,8 @@ class VAE_Model(nn.Module):
                 'mse': [],
                 'kld': [],
                 'psnr_per_frame': []
-            }
+            },
+            'tfr': [],
         }
         
         
@@ -157,7 +158,9 @@ class VAE_Model(nn.Module):
         # self.Decoder_Fusion.train()
         # self.Generator.train()
 
-        logfile = open(os.path.join(self.args.save_root, 'log.txt'), 'a')
+        logfile_train = open(os.path.join(self.args.save_root, 'log_train.txt'), 'w')
+        logfile_val = open(os.path.join(self.args.save_root, 'log_val.txt'), 'w')
+        logfile_tfr = open(os.path.join(self.args.save_root, 'log_tfr.txt'), 'w')
         for i in range(self.args.num_epoch):
             train_loader = self.train_dataloader()
             adapt_TeacherForcing = True if random.random() < self.tfr else False
@@ -190,16 +193,21 @@ class VAE_Model(nn.Module):
                 self.log['train']['kld'].append(total_kld / cnt_not_NaN)
             if self.current_epoch % self.args.per_save == 0:
                 self.save(os.path.join(self.args.save_root, f"epoch={self.current_epoch}.ckpt"))
+            self.log['tfr'].append(self.tfr)
             # append log
-            print("cnt_not_NaN/cnt_o: ", cnt_not_NaN, "/", cnt_o, flush=True)
-            print(f"epoch: {i} [Train] loss: {self.log['train']['loss'][-1]}, mse: {self.log['train']['mse'][-1]}, kld: {self.log['train']['kld'][-1]}", file=logfile, flush=True)
+            print("epoch: ", i, "cnt_not_NaN/cnt_o: ", cnt_not_NaN, "/", cnt_o, flush=True)
+            # print(f"epoch: {i} [Train] loss: {self.log['train']['loss'][-1]}, mse: {self.log['train']['mse'][-1]}, kld: {self.log['train']['kld'][-1]}", file=logfile_train, flush=True)
+            # print(f"epoch: {i} tfr: {self.log['tfr'][-1]}", file=logfile_tfr, flush=True)
+            print(i, ", ", self.log['train']['loss'][-1], ", ", self.log['train']['mse'][-1], ", ", self.log['train']['kld'][-1], flush=True, file=logfile_train)
+            print(i, ", ", self.log['tfr'][-1], flush=True, file=logfile_tfr)
             self.eval()
             self.current_epoch += 1
             self.scheduler.step()
             self.teacher_forcing_ratio_update()
             self.kl_annealing.update()
 
-            print(f"epoch: {i} [Valid] loss: {self.log['val']['loss'][-1]}, mse: {self.log['val']['mse'][-1]}, kld: {self.log['val']['kld'][-1]}", file=logfile, flush=True)
+            # print(f"epoch: {i} [Valid] loss: {self.log['val']['loss'][-1]}, mse: {self.log['val']['mse'][-1]}, kld: {self.log['val']['kld'][-1]}", file=logfile_val, flush=True)
+            print(i, ", ", self.log['val']['loss'][-1], ", ", self.log['val']['mse'][-1], ", ", self.log['val']['kld'][-1], flush=True, file=logfile_val)
         
         # save log file using name
         for log_type in ['train', 'val']:
@@ -226,7 +234,6 @@ class VAE_Model(nn.Module):
             self.log['val']['mse'].append(mse.detach().cpu())
             self.log['val']['kld'].append(kld.detach().cpu())
             self.log['val']['psnr_per_frame'].append(psnrs)
-            print("img_shape: ", img.shape, flush=True)
         imgs = []
         for img in preds:
             img = img[0].detach().cpu()
@@ -350,6 +357,7 @@ class VAE_Model(nn.Module):
         preds = [img[0]]
         for i in range(self.val_vi_len - 1):
             z, mu, logvar = self.Gaussian_Predictor.forward(code_img[i+1], code_label[i+1])
+            z = torch.randn((1, self.args.N_dim, self.args.frame_H, self.args.frame_W)).to(self.args.device)
             output = self.Decoder_Fusion.forward(pred, code_label[i+1], z)
             pred = self.Generator.forward(output)
             pred = torch.clamp(pred, 0, 1)
