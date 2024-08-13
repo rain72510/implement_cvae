@@ -63,7 +63,7 @@ class kl_annealing():
     def get_beta(self):
         return self.beta
 
-    def frange_cycle_linear(self, n_iter, start=0.2, stop=1.0, n_cycle=1, ratio=1):
+    def frange_cycle_linear(self, n_iter, start=0, stop=1.0, n_cycle=1, ratio=1):
         # 0 to 1 in n_cycle * ratio, then 1 in n_cycle * (1-ratio)
         return max(start, min(stop, start + (stop - start) * min((n_iter % (n_cycle * ratio))/(n_cycle * ratio), 1.0)))
         raise NotImplementedError
@@ -128,44 +128,38 @@ class VAE_Model(nn.Module):
         plt.savefig(os.path.join(self.args.save_root, 'loss.png'))
         plt.clf()
 
-        plt.figure()
-        plt.plot(self.log['train']['mse'], label='train_mse')
-        plt.plot(self.log['val']['mse'], label='val_mse')
-        plt.legend()
-        plt.title('MSE')
-        plt.savefig(os.path.join(self.args.save_root, 'mse.png'))
-        plt.clf()
+        # plt.figure()
+        # plt.plot(self.log['train']['mse'], label='train_mse')
+        # plt.plot(self.log['val']['mse'], label='val_mse')
+        # plt.legend()
+        # plt.title('MSE')
+        # plt.savefig(os.path.join(self.args.save_root, 'mse.png'))
+        # plt.clf()
         
-        plt.figure()
-        plt.plot(self.log['train']['kld'], label='train_kld')
-        plt.plot(self.log['val']['kld'], label='val_kld')
-        plt.legend()
-        plt.title('KLD')
-        plt.savefig(os.path.join(self.args.save_root, 'kld.png'))
-        plt.clf()
+        # plt.figure()
+        # plt.plot(self.log['train']['kld'], label='train_kld')
+        # plt.plot(self.log['val']['kld'], label='val_kld')
+        # plt.legend()
+        # plt.title('KLD')
+        # plt.savefig(os.path.join(self.args.save_root, 'kld.png'))
+        # plt.clf()
         
-        plt.figure()
-        plt.plot(self.log['val']['psnr_per_frame'][-1], label='val_psnr')
-        plt.legend()
-        plt.title('PSNR')
-        plt.savefig(os.path.join(self.args.save_root, 'psnr.png'))
-        plt.clf()
+        # plt.figure()
+        # plt.plot(self.log['val']['psnr_per_frame'][-1], label='val_psnr')
+        # plt.legend()
+        # plt.title('PSNR')
+        # plt.savefig(os.path.join(self.args.save_root, 'psnr.png'))
+        # plt.clf()
     
     def training_stage(self):
-        # self.frame_transformation.train()
-        # self.label_transformation.train()
-        # self.Gaussian_Predictor.train()
-        # self.Decoder_Fusion.train()
-        # self.Generator.train()
 
-        logfile_train = open(os.path.join(self.args.save_root, 'log_train.txt'), 'w')
-        logfile_val = open(os.path.join(self.args.save_root, 'log_val.txt'), 'w')
-        logfile_tfr = open(os.path.join(self.args.save_root, 'log_tfr.txt'), 'w')
+        # logfile_train = open(os.path.join(self.args.save_root, 'log_train.txt'), 'w')
+        # logfile_val = open(os.path.join(self.args.save_root, 'log_val.txt'), 'w')
+        # logfile_tfr = open(os.path.join(self.args.save_root, 'log_tfr.txt'), 'w')
         for i in range(self.args.num_epoch):
             train_loader = self.train_dataloader()
             adapt_TeacherForcing = True if random.random() < self.tfr else False
             
-            cnt_o = 0
             cnt_not_NaN = 0
             total_loss = 0.0
             total_mse = 0.0
@@ -173,8 +167,7 @@ class VAE_Model(nn.Module):
             for (img, label) in (pbar := tqdm(train_loader, ncols=120)):
                 img = img.to(self.args.device)
                 label = label.to(self.args.device)
-                loss, mse, kld = self.training_one_step(img, label, adapt_TeacherForcing, cnt_o)
-                cnt_o += 1
+                loss, mse, kld = self.training_one_step(img, label, adapt_TeacherForcing)
                 if loss == "NaN":
                     continue
                 cnt_not_NaN += 1
@@ -195,11 +188,8 @@ class VAE_Model(nn.Module):
                 self.save(os.path.join(self.args.save_root, f"epoch={self.current_epoch}.ckpt"))
             self.log['tfr'].append(self.tfr)
             # append log
-            print("epoch: ", i, "cnt_not_NaN/cnt_o: ", cnt_not_NaN, "/", cnt_o, flush=True)
-            # print(f"epoch: {i} [Train] loss: {self.log['train']['loss'][-1]}, mse: {self.log['train']['mse'][-1]}, kld: {self.log['train']['kld'][-1]}", file=logfile_train, flush=True)
-            # print(f"epoch: {i} tfr: {self.log['tfr'][-1]}", file=logfile_tfr, flush=True)
-            print(i, ", ", self.log['train']['loss'][-1], ", ", self.log['train']['mse'][-1], ", ", self.log['train']['kld'][-1], flush=True, file=logfile_train)
-            print(i, ", ", self.log['tfr'][-1], flush=True, file=logfile_tfr)
+            # print(i, ", ", self.log['train']['loss'][-1], ", ", self.log['train']['mse'][-1], ", ", self.log['train']['kld'][-1], flush=True, file=logfile_train)
+            # print(i, ", ", self.log['tfr'][-1], flush=True, file=logfile_tfr)
             self.eval()
             self.current_epoch += 1
             self.scheduler.step()
@@ -207,7 +197,7 @@ class VAE_Model(nn.Module):
             self.kl_annealing.update()
 
             # print(f"epoch: {i} [Valid] loss: {self.log['val']['loss'][-1]}, mse: {self.log['val']['mse'][-1]}, kld: {self.log['val']['kld'][-1]}", file=logfile_val, flush=True)
-            print(i, ", ", self.log['val']['loss'][-1], ", ", self.log['val']['mse'][-1], ", ", self.log['val']['kld'][-1], flush=True, file=logfile_val)
+            # print(i, ", ", self.log['val']['loss'][-1], ", ", self.log['val']['mse'][-1], ", ", self.log['val']['kld'][-1], flush=True, file=logfile_val)
         
         # save log file using name
         for log_type in ['train', 'val']:
@@ -220,11 +210,6 @@ class VAE_Model(nn.Module):
     @torch.no_grad()
     def eval(self):
         val_loader = self.val_dataloader()
-        # self.frame_transformation.eval()
-        # self.label_transformation.eval()
-        # self.Gaussian_Predictor.eval()
-        # self.Decoder_Fusion.eval()
-        # self.Generator.eval()
         for (img, label) in (pbar := tqdm(val_loader, ncols=120)):
             img = img.to(self.args.device)
             label = label.to(self.args.device)
@@ -239,17 +224,15 @@ class VAE_Model(nn.Module):
             img = img[0].detach().cpu()
             imgs.append(img)
         self.make_gif(imgs, os.path.join(self.args.save_root, f"epoch={self.current_epoch}.gif"))
-        
+        # plot the last psnr
+        plt.figure()
+        plt.plot(psnrs.detach().cpu().numpy())
+        plt.title('PSNR')
+        plt.savefig(os.path.join(self.args.save_root, f"epoch={self.current_epoch}_psnr.png"))
+        plt.clf()
     
-    def training_one_step(self, img, label, adapt_TeacherForcing, cnt_o):
-        def mse_myf(pred, img):
-            return torch.mean((pred - img) ** 2)
+    def training_one_step(self, img, label, adapt_TeacherForcing):
         img, label = img.transpose(0, 1), label.transpose(0, 1)
-        # print img max, min, label max, min
-        if img.max() > 1 or label.max() > 1:
-            print("imglabel max!, epoch: ", self.current_epoch, " i: ", cnt_o, flush=True)
-            print("img max: ", img.max(), "img min: ", img.min(), flush=True)
-            print("label max: ", label.max(), "label min: ", label.min(), flush=True)
         code_img = []
         code_label = []
         for i in range(self.train_vi_len):
@@ -274,69 +257,26 @@ class VAE_Model(nn.Module):
             pred = torch.clamp(pred, 0, 1)
             if torch.isnan(pred).any():
                 NaNhere = True
-                print("NaNishere!", flush=True)
-                break
-            # change nan to 1
             pred = torch.nan_to_num(pred, nan=1.0, posinf=1.0, neginf=0.0)
 
             mse = self.mse_criterion(pred, img[i+1])
-            mse_my = mse_myf(pred, img[i+1])
             kld = kl_criterion(mu, logvar, self.batch_size) / (self.args.frame_H * self.args.frame_W * self.args.N_dim)
             # loss = mse + kld * beta
             total_mse += mse
             total_kld += kld
-            if mse != mse:
-                # print output, pred, img[i+1], z, mu, logvar
-                print("explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
-                print("mse_my: ", mse_my, flush=True)
-                print("output: ", output, flush=True)
-                print("pred: ", pred, flush=True)
-                print("img: ", img[i+1], flush=True)
-                print("z: ", z, flush=True)
-                print("mu: ", mu, flush=True)
-                print("logvar: ", logvar, flush=True)
             pred = self.frame_transformation.forward(pred)
             # loss.backward()
         total_mse /= min(1, (self.train_vi_len - 1))
         total_kld /= min(1, (self.train_vi_len - 1))
         total_loss = total_mse + total_kld * beta
         if NaNhere:
-            print("NaNishere! cnt_o: ", cnt_o, flush=True)
             return "NaN", 0, 0
         self.optim.zero_grad()
         total_loss.backward()
 
-        # if total_mse > 20:
-        #     print("explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
-        #     # print maximum gradient
-        #     max_grad = 0
-        #     for name, param in self.Decoder_Fusion.named_parameters():
-        #         if param.grad is not None:
-        #             max_grad = max(max_grad, param.grad.abs().max())
-        #     print("Decoder_Fusion max_grad: ", max_grad, flush=True)
-        #     max_grad = 0
-        #     for name, param in self.Generator.named_parameters():
-        #         if param.grad is not None:
-        #             max_grad = max(max_grad, param.grad.abs().max())
-        #     print("Generator max_grad: ", max_grad, flush=True)
-
 
         nn.utils.clip_grad_norm_(self.parameters(), 1.)
-        # if total_mse > 20:
-        #     print("after clip explode epoch:", self.current_epoch, " i: ", i, "mse: ", mse, flush=True)
-        #     # print maximum gradient
-        #     max_grad = 0
-        #     for name, param in self.Decoder_Fusion.named_parameters():
-        #         if param.grad is not None:
-        #             max_grad = max(max_grad, param.grad.abs().max())
-        #     print("Decoder_Fusion max_grad: ", max_grad, flush=True)
-        #     max_grad = 0
-        #     for name, param in self.Generator.named_parameters():
-        #         if param.grad is not None:
-        #             max_grad = max(max_grad, param.grad.abs().max())
-        #     print("Generator max_grad: ", max_grad, flush=True)
         self.optim.step()
-        # self.optimizer_step()
         return total_loss, total_mse, total_kld
         
     
@@ -513,6 +453,10 @@ if __name__ == '__main__':
     parser.add_argument('--kl_anneal_ratio',    type=float, default=1,              help="")
     
 
+    SEED = 42
+    random.seed(SEED)
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
     
 
     args = parser.parse_args()

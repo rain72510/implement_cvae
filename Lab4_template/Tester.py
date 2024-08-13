@@ -136,6 +136,8 @@ class Test_model(VAE_Model):
 
             
             decoded_frame = self.Generator(output)
+            # clip the pixel value to 0~1
+            decoded_frame = torch.clamp(decoded_frame, 0, 1)
             decoded_frame_list.append(decoded_frame.cpu())
             img_frame = decoded_frame
         
