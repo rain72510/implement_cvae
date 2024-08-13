@@ -226,7 +226,8 @@ class VAE_Model(nn.Module):
         self.make_gif(imgs, os.path.join(self.args.save_root, f"epoch={self.current_epoch}.gif"))
         # plot the last psnr
         plt.figure()
-        plt.plot(psnrs.detach().cpu().numpy())
+        psnrs = [x.detach().cpu() for x in psnrs]
+        plt.plot(psnrs)
         plt.title('PSNR')
         plt.savefig(os.path.join(self.args.save_root, f"epoch={self.current_epoch}_psnr.png"))
         plt.clf()
@@ -257,6 +258,7 @@ class VAE_Model(nn.Module):
             pred = torch.clamp(pred, 0, 1)
             if torch.isnan(pred).any():
                 NaNhere = True
+                break
             pred = torch.nan_to_num(pred, nan=1.0, posinf=1.0, neginf=0.0)
 
             mse = self.mse_criterion(pred, img[i+1])

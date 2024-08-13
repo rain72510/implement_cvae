@@ -239,6 +239,9 @@ if __name__ == '__main__':
     parser.add_argument('--kl_anneal_cycle',    type=int, default=10,               help="")
     parser.add_argument('--kl_anneal_ratio',    type=float, default=1,              help="")
     
+    SEED = 42
+    np.random.seed(SEED)
+    torch.manual_seed(SEED)
 
     
 
